@@ -41,7 +41,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # 4. Android SDK + NDK
+      # 4. آماده‌سازی پوشه اندروید (چون remove-android پوشه رو پاک کرده)
+      - name: Prepare Android dir
+        run: |
+          sudo mkdir -p /usr/local/lib/android
+          sudo chown -R $USER:$USER /usr/local/lib/android
+
+      # 5. Android SDK + NDK
       - name: Setup Android
         uses: android-actions/setup-android@v3
 
