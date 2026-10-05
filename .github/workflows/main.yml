@@ -49,7 +49,7 @@ jobs:
 
       # 5. Android SDK + NDK
       - name: Setup Android
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install NDK
         run: |
