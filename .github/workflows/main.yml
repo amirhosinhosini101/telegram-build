@@ -9,12 +9,13 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      # 1. بزرگ کردن فضای دیسک (root + /mnt رو ترکیب می‌کنه)
+
+      # 1. آزاد کردن حداکثری فضای Runner
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 8192
-          temp-reserve-mb: 1024
+          root-reserve-mb: 3072
+          temp-reserve-mb: 512
           swap-size-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'
@@ -22,10 +23,15 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Show disk
-        run: df -h
+      # 2. نمایش فضای موجود
+      - name: Show disk space
+        run: |
+          echo "=== Disk ==="
+          df -h
+          echo "=== Memory ==="
+          free -h
 
-      # 2. Checkout (بعد از maximize تا روی دیسک بزرگ بیفته)
+      # 3. دریافت سورس Telegram
       - name: Checkout Telegram
         uses: actions/checkout@v4
         with:
@@ -34,53 +40,99 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      # 3. Java 17
+      # 4. Java 17
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # 4. آماده‌سازی پوشه اندروید (چون remove-android پوشه رو پاک کرده)
-      - name: Prepare Android dir
+      # 5. ساخت مسیر Android SDK
+      - name: Prepare Android directory
         run: |
           sudo mkdir -p /usr/local/lib/android
-          sudo chown -R $USER:$USER /usr/local/lib/android
+          sudo chown -R "$USER:$USER" /usr/local/lib/android
 
-      # 5. Android SDK + NDK
+      # 6. Android SDK
       - name: Setup Android
         uses: android-actions/setup-android@v4
 
-      - name: Install NDK
+      # 7. نصب NDK مورد نیاز Telegram
+      - name: Install Android NDK
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "ndk;27.2.12479018"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
 
-      # 5. فقط arm64-v8a (هم فضای کمتر هم زمان کمتر)
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      # 8. بررسی فضای بعد از نصب SDK/NDK
+      - name: Check disk after Android setup
+        run: |
+          echo "=== Android SDK ==="
+          du -sh "$ANDROID_HOME" 2>/dev/null || true
+
+          echo "=== Disk ==="
+          df -h
+
+      # 9. فقط ARM64
       - name: Keep only arm64-v8a
         run: |
-          grep -rlE "abiFilters|armeabi-v7a" --include=build.gradle --include=*.gradle . | while read f; do
-            echo "Patching $f"
-            sed -i -E '/abiFilters/ s/abiFilters.*/abiFilters "arm64-v8a"/' "$f"
-            sed -i -E '/include +"armeabi-v7a"/ s/include.*/include "arm64-v8a"/' "$f"
-          done
-          grep -rnE "abiFilters|include +\"arm" --include=*.gradle . || true
+          echo "Patching ABI configuration..."
 
-      # 6. gradle.properties
-      - name: Optimize gradle.properties
+          grep -rlE "abiFilters|armeabi-v7a" \
+            --include='build.gradle' \
+            --include='*.gradle' \
+            . 2>/dev/null |
+          while read -r f; do
+            echo "Patching $f"
+
+            sed -i -E \
+              '/abiFilters/ s/abiFilters.*/abiFilters "arm64-v8a"/' \
+              "$f" || true
+
+            sed -i -E \
+              '/include +"armeabi-v7a"/ s/include.*/include "arm64-v8a"/' \
+              "$f" || true
+          done
+
+          echo "=== ABI configuration ==="
+
+          grep -rnE \
+            "abiFilters|include +\"arm" \
+            --include='*.gradle' \
+            . 2>/dev/null || true
+
+      # 10. Gradle configuration
+      - name: Optimize Gradle
         run: |
           mkdir -p ~/.gradle
-          cat >> ~/.gradle/gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+
+          cat > ~/.gradle/gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
           org.gradle.parallel=true
           org.gradle.caching=true
           org.gradle.daemon=false
           android.useAndroidX=true
           EOF
 
-      # 7. ccache
+      # 11. نصب ccache
+      - name: Install ccache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+
+          ccache --max-size=2G
+
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+
+      # 12. Cache ccache
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -89,13 +141,7 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-
 
-      - name: Install ccache
-        run: |
-          sudo apt-get install -y ccache
-          ccache --max-size=2G
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-
-      # 8. Gradle cache
+      # 13. Gradle cache
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -106,27 +152,51 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
+      # 14. بررسی فضای قبل از Build
+      - name: Check disk before build
+        run: |
+          echo "=== Disk before build ==="
+          df -h
+
+          echo "=== Gradle ==="
+          du -sh ~/.gradle 2>/dev/null || true
+
+          echo "=== ccache ==="
+          du -sh ~/.ccache 2>/dev/null || true
+
+      # 15. Gradle executable
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      # 9. Build
+      # 16. Build Telegram
       - name: Build Telegram Debug APK
         run: |
           ./gradlew assembleDebug \
             --no-daemon \
-            --stacktrace
+            --stacktrace \
+            --max-workers=2
         env:
           CC: ccache clang
           CXX: ccache clang++
 
+      # 17. نمایش فضای بعد از Build
       - name: Disk usage after build
         if: always()
-        run: df -h
+        run: |
+          echo "=== Final disk ==="
+          df -h
 
+          echo "=== Largest directories ==="
+          du -h -d 2 . 2>/dev/null | sort -hr | head -30 || true
+
+      # 18. پیدا کردن APK
       - name: Find APK files
         if: success()
-        run: find . -name "*.apk" -type f -exec ls -lh {} \;
+        run: |
+          echo "=== APK files ==="
+          find . -type f -name "*.apk" -exec ls -lh {} \;
 
+      # 19. آپلود APK
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
