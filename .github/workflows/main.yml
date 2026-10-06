@@ -8,40 +8,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
+    permissions:
+      contents: write
+
     steps:
 
-      # 1. دانلود سورس از هاست خودت
-      - name: Download Telegram Source ZIP
-        run: |
-          set -e
-
-          echo "Downloading source..."
-
-          wget -O Telegram-master.zip \
-            "https://mramirhoseini.ir/Telegram-master.zip"
-
-          echo "=== ZIP SIZE ==="
-          ls -lh Telegram-master.zip
-
-          echo "=== Extracting ==="
-          unzip -q Telegram-master.zip
-
-          echo "=== Extracted folders ==="
-          ls -la
-
-          # انتقال محتویات Telegram-master به workspace
-          if [ -d "Telegram-master" ]; then
-            shopt -s dotglob
-            mv Telegram-master/* .
-            rmdir Telegram-master
-          fi
-
-          echo "=== SOURCE ROOT ==="
-          ls -la
-
-          echo "=== GRADLE CHECK ==="
-          test -f gradlew
-          echo "gradlew found successfully"
+      # 1. دریافت ریپازیتوری خودت
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       # 2. Java 17
       - name: Setup Java
@@ -72,33 +48,92 @@ jobs:
           echo "=== AFTER CLEANUP ==="
           df -h
 
-      # 5. نصب SDK و NDK
-      - name: Install Android SDK and NDK
+      # 5. دانلود ZIP سورس از سایت
+      - name: Download Telegram Source ZIP
         run: |
-          yes | sdkmanager --licenses || true
+          set -e
 
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;27.2.12479018"
+          echo "=== Downloading Telegram source ==="
 
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          wget -O Telegram-master.zip \
+            "https://mramirhoseini.ir/Telegram-master.zip"
 
-      # 6. بررسی فضای بعد از NDK
-      - name: Check disk after NDK
+          echo "=== ZIP SIZE ==="
+          ls -lh Telegram-master.zip
+
+      # 6. پاک کردن فایل‌های قبلی ریپو
+      - name: Prepare Repository
         run: |
-          echo "=== DISK ==="
-          df -h
+          set -e
 
-          echo "=== ANDROID SDK SIZE ==="
-          du -sh "$ANDROID_HOME" 2>/dev/null || true
+          echo "=== Current repository ==="
+          ls -la
 
-          echo "=== NDK SIZE ==="
-          du -sh "$ANDROID_HOME/ndk/27.2.12479018" 2>/dev/null || true
+          # حذف فایل‌های قبلی به جز .git و .github
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name ".github" \
+            -exec rm -rf {} +
 
-      # 7. فقط ARM64
+      # 7. استخراج سورس
+      - name: Extract Telegram Source
+        run: |
+          set -e
+
+          echo "=== Extracting source ==="
+
+          unzip -q Telegram-master.zip
+
+          echo "=== After extraction ==="
+          ls -la
+
+          # اگر ZIP شامل Telegram-master بود
+          if [ -d "Telegram-master" ]; then
+            echo "Telegram-master directory found."
+
+            shopt -s dotglob
+            cp -a Telegram-master/. .
+            rm -rf Telegram-master
+          fi
+
+          echo "=== Final source root ==="
+          ls -la
+
+      # 8. بررسی فایل‌های ضروری
+      - name: Verify Telegram Source
+        run: |
+          set -e
+
+          echo "=== Checking required files ==="
+
+          test -f gradlew || {
+            echo "ERROR: gradlew not found!"
+            exit 1
+          }
+
+          test -f settings.gradle || {
+            echo "ERROR: settings.gradle not found!"
+            exit 1
+          }
+
+          test -f TMessagesProj_Modules/media/core_settings.gradle || {
+            echo "ERROR: TMessagesProj_Modules/media/core_settings.gradle NOT FOUND!"
+            echo
+            echo "=== TMessagesProj_Modules ==="
+            find TMessagesProj_Modules -maxdepth 5 -type f 2>/dev/null || true
+            exit 1
+          }
+
+          echo
+          echo "SUCCESS!"
+          echo "All required Telegram source files exist."
+
+      # 9. حذف ZIP از ریپو
+      - name: Remove ZIP
+        run: |
+          rm -f Telegram-master.zip
+
+      # 10. فقط ARM64
       - name: Keep only arm64-v8a
         run: |
           grep -rlE "abiFilters|armeabi-v7a" \
@@ -117,7 +152,53 @@ jobs:
               "$f" || true
           done
 
-      # 8. Gradle تنظیمات
+      # 11. Commit سورس داخل ریپازیتوری خودت
+      - name: Commit Telegram Source
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "=== Git status ==="
+          git status --short
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update Telegram source"
+            git push
+          fi
+
+      # 12. نصب SDK و NDK
+      - name: Install Android SDK and NDK
+        run: |
+          yes | sdkmanager --licenses || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      # 13. بررسی فضای بعد از NDK
+      - name: Check disk after NDK
+        run: |
+          echo "=== DISK ==="
+          df -h
+
+          echo "=== ANDROID SDK SIZE ==="
+          du -sh "$ANDROID_HOME" 2>/dev/null || true
+
+          echo "=== NDK SIZE ==="
+          du -sh "$ANDROID_HOME/ndk/27.2.12479018" 2>/dev/null || true
+
+      # 14. Gradle تنظیمات
       - name: Configure Gradle
         run: |
           mkdir -p ~/.gradle
@@ -130,7 +211,7 @@ jobs:
           android.useAndroidX=true
           EOF
 
-      # 9. ccache
+      # 15. ccache
       - name: Install ccache
         run: |
           sudo apt-get update
@@ -140,7 +221,7 @@ jobs:
 
           echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
 
-      # 10. Cache ccache
+      # 16. Cache ccache
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -149,7 +230,7 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-
 
-      # 11. Gradle cache
+      # 17. Cache Gradle
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -160,7 +241,7 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      # 12. فضای قبل از Build
+      # 18. فضای قبل از Build
       - name: Check disk before build
         run: |
           echo "=== DISK BEFORE BUILD ==="
@@ -172,11 +253,11 @@ jobs:
           echo "=== CCACHE ==="
           du -sh ~/.ccache 2>/dev/null || true
 
-      # 13. Gradle executable
+      # 19. Gradle executable
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      # 14. Build
+      # 20. Build
       - name: Build Telegram Debug APK
         run: |
           ./gradlew assembleDebug \
@@ -187,14 +268,14 @@ jobs:
           CC: ccache clang
           CXX: ccache clang++
 
-      # 15. پیدا کردن APK
+      # 21. پیدا کردن APK
       - name: Find APK
         if: success()
         run: |
           echo "=== APK FILES ==="
           find . -type f -name "*.apk" -exec ls -lh {} \;
 
-      # 16. آپلود APK
+      # 22. آپلود APK
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
@@ -204,7 +285,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # 17. فضای نهایی
+      # 23. فضای نهایی
       - name: Final disk usage
         if: always()
         run: |
