@@ -10,14 +10,38 @@ jobs:
 
     steps:
 
-      # 1. دریافت سورس
-      - name: Checkout Telegram
-        uses: actions/checkout@v4
-        with:
-          repository: DrKLO/Telegram
-          ref: master
-          submodules: recursive
-          fetch-depth: 1
+      # 1. دانلود سورس از هاست خودت
+      - name: Download Telegram Source ZIP
+        run: |
+          set -e
+
+          echo "Downloading source..."
+
+          wget -O Telegram-master.zip \
+            "https://mramirhoseini.ir/Telegram-master.zip"
+
+          echo "=== ZIP SIZE ==="
+          ls -lh Telegram-master.zip
+
+          echo "=== Extracting ==="
+          unzip -q Telegram-master.zip
+
+          echo "=== Extracted folders ==="
+          ls -la
+
+          # انتقال محتویات Telegram-master به workspace
+          if [ -d "Telegram-master" ]; then
+            shopt -s dotglob
+            mv Telegram-master/* .
+            rmdir Telegram-master
+          fi
+
+          echo "=== SOURCE ROOT ==="
+          ls -la
+
+          echo "=== GRADLE CHECK ==="
+          test -f gradlew
+          echo "gradlew found successfully"
 
       # 2. Java 17
       - name: Setup Java
@@ -48,7 +72,7 @@ jobs:
           echo "=== AFTER CLEANUP ==="
           df -h
 
-      # 5. نصب فقط SDK و NDK مورد نیاز
+      # 5. نصب SDK و NDK
       - name: Install Android SDK and NDK
         run: |
           yes | sdkmanager --licenses || true
@@ -148,7 +172,7 @@ jobs:
           echo "=== CCACHE ==="
           du -sh ~/.ccache 2>/dev/null || true
 
-      # 13. Gradle
+      # 13. Gradle executable
       - name: Make Gradle executable
         run: chmod +x gradlew
 
