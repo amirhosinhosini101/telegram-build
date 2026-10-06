@@ -48,46 +48,50 @@ jobs:
           echo "=== AFTER CLEANUP ==="
           df -h
 
-      # 5. دانلود ZIP سورس از سایت
+      # 5. دانلود ZIP خارج از Workspace
       - name: Download Telegram Source ZIP
         run: |
           set -e
 
           echo "=== Downloading Telegram source ==="
 
-          wget -O Telegram-master.zip \
+          wget -O /tmp/Telegram-master.zip \
             "https://mramirhoseini.ir/Telegram-master.zip"
 
-          echo "=== ZIP SIZE ==="
-          ls -lh Telegram-master.zip
+          echo "=== DOWNLOADED FILE ==="
+          ls -lh /tmp/Telegram-master.zip
 
-      # 6. پاک کردن فایل‌های قبلی ریپو
+          echo "=== FILE TYPE ==="
+          file /tmp/Telegram-master.zip
+
+      # 6. پاک کردن سورس قبلی ریپو
       - name: Prepare Repository
         run: |
           set -e
 
-          echo "=== Current repository ==="
-          ls -la
+          echo "=== Cleaning old repository files ==="
 
-          # حذف فایل‌های قبلی به جز .git و .github
           find . -mindepth 1 -maxdepth 1 \
             ! -name ".git" \
             ! -name ".github" \
             -exec rm -rf {} +
 
-      # 7. استخراج سورس
+          echo "=== Repository after cleanup ==="
+          ls -la
+
+      # 7. استخراج ZIP
       - name: Extract Telegram Source
         run: |
           set -e
 
-          echo "=== Extracting source ==="
+          echo "=== Extracting Telegram source ==="
 
-          unzip -q Telegram-master.zip
+          unzip -q /tmp/Telegram-master.zip
 
           echo "=== After extraction ==="
           ls -la
 
-          # اگر ZIP شامل Telegram-master بود
+          # اگر ZIP شامل Telegram-master باشد
           if [ -d "Telegram-master" ]; then
             echo "Telegram-master directory found."
 
@@ -96,42 +100,54 @@ jobs:
             rm -rf Telegram-master
           fi
 
-          echo "=== Final source root ==="
+          echo "=== FINAL SOURCE ROOT ==="
           ls -la
 
-      # 8. بررسی فایل‌های ضروری
+      # 8. بررسی سورس
       - name: Verify Telegram Source
         run: |
           set -e
 
-          echo "=== Checking required files ==="
+          echo "================================"
+          echo "VERIFYING TELEGRAM SOURCE"
+          echo "================================"
+
+          echo
+          echo "Checking gradlew..."
 
           test -f gradlew || {
             echo "ERROR: gradlew not found!"
             exit 1
           }
 
+          echo
+          echo "Checking settings.gradle..."
+
           test -f settings.gradle || {
             echo "ERROR: settings.gradle not found!"
             exit 1
           }
 
-          test -f TMessagesProj_Modules/media/core_settings.gradle || {
-            echo "ERROR: TMessagesProj_Modules/media/core_settings.gradle NOT FOUND!"
+          echo
+          echo "Checking core_settings.gradle..."
+
+          if [ ! -f "TMessagesProj_Modules/media/core_settings.gradle" ]; then
+            echo "ERROR: core_settings.gradle NOT FOUND!"
             echo
-            echo "=== TMessagesProj_Modules ==="
+            echo "=== TMessagesProj_Modules structure ==="
             find TMessagesProj_Modules -maxdepth 5 -type f 2>/dev/null || true
             exit 1
-          }
+          fi
 
           echo
-          echo "SUCCESS!"
-          echo "All required Telegram source files exist."
+          echo "================================"
+          echo "SOURCE IS COMPLETE"
+          echo "================================"
 
-      # 9. حذف ZIP از ریپو
-      - name: Remove ZIP
+      # 9. حذف ZIP موقت
+      - name: Remove Temporary ZIP
         run: |
-          rm -f Telegram-master.zip
+          rm -f /tmp/Telegram-master.zip
 
       # 10. فقط ARM64
       - name: Keep only arm64-v8a
@@ -152,7 +168,7 @@ jobs:
               "$f" || true
           done
 
-      # 11. Commit سورس داخل ریپازیتوری خودت
+      # 11. Commit سورس داخل ریپازیتوری
       - name: Commit Telegram Source
         run: |
           set -e
@@ -241,7 +257,7 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      # 18. فضای قبل از Build
+      # 18. فضای قبل Build
       - name: Check disk before build
         run: |
           echo "=== DISK BEFORE BUILD ==="
