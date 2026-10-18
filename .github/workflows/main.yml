@@ -8,6 +8,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
 
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a]
+
     steps:
 
       # 1. دریافت مستقیم سورس از مخزن خودت
@@ -126,8 +131,10 @@ jobs:
           echo "=== NDK SIZE ==="
           du -sh "$ANDROID_HOME/ndk/27.2.12479018" 2>/dev/null || true
 
-      # 8. فقط ARM64
-      - name: Keep only arm64-v8a
+      # 8. فقط ABI انتخاب‌شده (قدیمی یا جدید)
+      - name: Keep only selected ABI (${{ matrix.abi }})
+        env:
+          TARGET_ABI: ${{ matrix.abi }}
         run: |
           grep -rlE "abiFilters|armeabi-v7a" \
             --include='build.gradle' \
@@ -137,11 +144,11 @@ jobs:
             echo "Patching: $f"
 
             sed -i -E \
-              '/abiFilters/ s/abiFilters.*/abiFilters "arm64-v8a"/' \
+              "/abiFilters/ s/abiFilters.*/abiFilters \"$TARGET_ABI\"/" \
               "$f" || true
 
             sed -i -E \
-              '/include +"armeabi-v7a"/ s/include.*/include "arm64-v8a"/' \
+              "/include +\"armeabi-v7a\"/ s/include.*/include \"$TARGET_ABI\"/" \
               "$f" || true
           done
 
@@ -168,14 +175,14 @@ jobs:
 
           echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
 
-      # 11. Cache ccache
+      # 11. Cache ccache (جدا برای هر ABI)
       - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ runner.os }}-${{ github.sha }}
+          key: ccache-${{ runner.os }}-${{ matrix.abi }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ runner.os }}-
+            ccache-${{ runner.os }}-${{ matrix.abi }}-
 
       # 12. Gradle cache
       - name: Cache Gradle
@@ -205,7 +212,7 @@ jobs:
         run: chmod +x gradlew
 
       # 15. Build
-      - name: Build Telegram Debug APK
+      - name: Build Telegram Debug APK (${{ matrix.abi }})
         run: |
           ./gradlew assembleDebug \
             --no-daemon \
@@ -227,7 +234,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-Debug-APK
+          name: Telegram-Debug-${{ matrix.abi }}
           path: "**/build/outputs/apk/**/*.apk"
           if-no-files-found: error
           retention-days: 14
